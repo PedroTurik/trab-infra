@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="utf-8">
+<title>Relatório — Pedro Turik Firmino</title>
+<style>
+@page { size: A4; margin: 18mm 16mm 18mm 16mm; }
+* { box-sizing: border-box; }
+html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+body {
+  font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  font-size: 10.5pt; line-height: 1.5; color: #1a1a1a; margin: 0;
+}
+.cover {
+  height: 245mm; display: flex; flex-direction: column;
+  justify-content: center; text-align: center; page-break-after: always;
+}
+.cover .uni { font-size: 13pt; letter-spacing: .5px; color: #444; text-transform: uppercase; }
+.cover h1 {
+  font-size: 26pt; margin: 18mm 0 4mm; color: #0d3b66; border: 0;
+}
+.cover .sub { font-size: 14pt; color: #555; margin-bottom: 30mm; }
+.cover .info {
+  display: inline-block; text-align: left; font-size: 12pt;
+  border-top: 2px solid #0d3b66; border-bottom: 2px solid #0d3b66;
+  padding: 8mm 14mm; line-height: 2;
+}
+.cover .info b { color: #0d3b66; display: inline-block; min-width: 42mm; }
+h1, h2, h3 { color: #0d3b66; page-break-after: avoid; line-height: 1.25; }
+h1 { font-size: 18pt; border-bottom: 2px solid #0d3b66; padding-bottom: 3px; }
+h2 { font-size: 14pt; margin-top: 9mm; border-bottom: 1px solid #cdd9e5; padding-bottom: 2px; }
+h3 { font-size: 12pt; margin-top: 6mm; }
+p, li { text-align: justify; }
+a { color: #0d3b66; text-decoration: none; }
+blockquote {
+  border-left: 4px solid #f0a500; background: #fff8e6; margin: 4mm 0;
+  padding: 2mm 5mm; color: #5a4500; font-size: 9.8pt;
+}
+code {
+  font-family: "DejaVu Sans Mono", "Consolas", monospace; font-size: 9pt;
+  background: #eef2f6; padding: 1px 4px; border-radius: 3px;
+}
+pre {
+  background: #1e2a38; color: #e6edf3; padding: 4mm; border-radius: 5px;
+  overflow-x: auto; page-break-inside: avoid; font-size: 8.6pt; line-height: 1.45;
+}
+pre code { background: transparent; color: inherit; padding: 0; font-size: inherit; }
+table {
+  border-collapse: collapse; width: 100%; margin: 4mm 0;
+  font-size: 8.8pt; page-break-inside: avoid;
+}
+th, td { border: 1px solid #b8c4d0; padding: 4px 6px; text-align: left; vertical-align: top; }
+th { background: #0d3b66; color: #fff; }
+tr:nth-child(even) td { background: #f4f7fa; }
+hr { border: 0; border-top: 1px solid #cdd9e5; margin: 7mm 0; }
+strong { color: #0a2e52; }
+</style></head>
+<body>
+<div class="cover">
+  <div class="uni">Universidade — Trabalho 2</div>
+  <h1>Controle de Concorrência em SQL</h1>
+  <div class="sub">PostgreSQL 18 · Loja / Vendas</div>
+  <div class="info">
+    <div><b>Aluno:</b> Pedro Turik Firmino</div>
+    <div><b>Matrícula:</b> 22200699</div>
+    <div><b>Disciplina:</b> Infraestrutura para Gestão de Dados</div>
+  </div>
+</div>
+<h1 id="trabalho-2-controle-de-concorrencia-em-sql">Trabalho 2 — Controle de Concorrência em SQL</h1>
+<p><strong>Disciplina:</strong> Infraestrutura para Gestão de Dados
+<strong>SGBD:</strong> PostgreSQL 18 (container Docker)
+<strong>Contexto da aplicação:</strong> Loja / vendas (<code>cliente</code>, <code>produto</code>, <code>pedido</code>, <code>item_pedido</code>)</p>
+<blockquote>
+<p>Como reproduzir tudo: <code>bash scripts/run_all.sh</code> (sobe o banco, aplica
+esquema + dados, executa os cenários e a avaliação de desempenho). Veja o
+<code>README.md</code> para detalhes.</p>
+</blockquote>
+<hr />
+<h2 id="visao-geral-do-cenario">Visão geral do cenário</h2>
+<p>Quatro transações concorrentes que compartilham dados (linhas dos produtos 1 e 2 e
+a categoria <code>eletronicos</code>) e cumprem os papéis exigidos:</p>
+<table>
+<thead>
+<tr>
+<th>Transação</th>
+<th>Papel exigido</th>
+<th>O que faz</th>
+<th>Bloqueios</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>T1</strong></td>
+<td>Causar <strong>Phantom Read</strong></td>
+<td>Relatório: conta <code>eletronicos</code> duas vezes; entre elas T4 insere</td>
+<td>Implícito (leitura/snapshot), <code>READ COMMITTED</code></td>
+</tr>
+<tr>
+<td><strong>T2</strong></td>
+<td>Causar <strong>1 Deadlock</strong></td>
+<td>Transfere estoque: trava produto 1 → produto 2</td>
+<td>Explícito <code>SELECT ... FOR UPDATE</code></td>
+</tr>
+<tr>
+<td><strong>T3</strong></td>
+<td>Executar <strong>sem inconsistências</strong></td>
+<td>Venda: trava produto 2 → produto 1 (ordem inversa), registra pedido</td>
+<td>Explícito <code>SELECT ... FOR UPDATE</code></td>
+</tr>
+<tr>
+<td><strong>T4</strong></td>
+<td>Executar <strong>sem inconsistências</strong></td>
+<td>Cadastra novo produto <code>eletronicos</code> + reposição</td>
+<td>Implícito (INSERT/UPDATE)</td>
+</tr>
+</tbody>
+</table>
+<p>O <strong>phantom</strong> surge entre T1 e T4; o <strong>deadlock</strong> surge entre T2 e T3 (T2 é a vítima
+abortada, T3 sobrevive e confirma). Assim, um único escalonamento exercita os quatro
+comportamentos.</p>
+<hr />
+<h2 id="1-script-de-criacao-das-tabelas-sql01_schemasql">1. Script de criação das tabelas (<code>sql/01_schema.sql</code>)</h2>
+<pre><code class="language-sql">DROP TABLE IF EXISTS item_pedido CASCADE;
+DROP TABLE IF EXISTS pedido      CASCADE;
+DROP TABLE IF EXISTS produto     CASCADE;
+DROP TABLE IF EXISTS cliente     CASCADE;
+
+CREATE TABLE cliente (
+    cliente_id  SERIAL PRIMARY KEY,
+    nome        VARCHAR(120) NOT NULL,
+    email       VARCHAR(120) NOT NULL UNIQUE
+);
+
+CREATE TABLE produto (
+    produto_id  SERIAL PRIMARY KEY,
+    nome        VARCHAR(120) NOT NULL,
+    categoria   VARCHAR(60)  NOT NULL,
+    preco       NUMERIC(10,2) NOT NULL CHECK (preco &gt;= 0),
+    estoque     INTEGER       NOT NULL CHECK (estoque &gt;= 0)
+);
+CREATE INDEX idx_produto_categoria ON produto (categoria);
+
+CREATE TABLE pedido (
+    pedido_id   SERIAL PRIMARY KEY,
+    cliente_id  INTEGER NOT NULL REFERENCES cliente (cliente_id),
+    criado_em   TIMESTAMP NOT NULL DEFAULT now(),
+    status      VARCHAR(20) NOT NULL DEFAULT 'ABERTO',
+    total       NUMERIC(10,2) NOT NULL DEFAULT 0 CHECK (total &gt;= 0)
+);
+
+CREATE TABLE item_pedido (
+    pedido_id      INTEGER NOT NULL REFERENCES pedido (pedido_id),
+    produto_id     INTEGER NOT NULL REFERENCES produto (produto_id),
+    quantidade     INTEGER NOT NULL CHECK (quantidade &gt; 0),
+    preco_unitario NUMERIC(10,2) NOT NULL CHECK (preco_unitario &gt;= 0),
+    PRIMARY KEY (pedido_id, produto_id)
+);
+</code></pre>
+<p>A restrição <code>CHECK (estoque &gt;= 0)</code> garante a integridade que as transações
+concorrentes podem ameaçar (estoque negativo).</p>
+<hr />
+<h2 id="2-script-de-insercao-de-dados-sql02_seedsql">2. Script de inserção de dados (<code>sql/02_seed.sql</code>)</h2>
+<pre><code class="language-sql">TRUNCATE item_pedido, pedido, produto, cliente RESTART IDENTITY CASCADE;
+
+INSERT INTO cliente (nome, email) VALUES
+    ('Ana Souza','ana@example.com'), ('Bruno Lima','bruno@example.com'),
+    ('Carla Dias','carla@example.com'), ('Diego Alves','diego@example.com'),
+    ('Elis Martins','elis@example.com');
+
+-- ids 1..3 = 'eletronicos' (dados em comum das transacoes)
+INSERT INTO produto (nome, categoria, preco, estoque) VALUES
+    ('Notebook Pro','eletronicos',4500.00,30),  -- produto_id = 1
+    ('Smartphone X','eletronicos',2999.90,40),  -- produto_id = 2
+    ('Monitor 27&quot;','eletronicos',1200.00,25),   -- produto_id = 3
+    ('Cadeira Gamer','moveis',899.00,15),        -- produto_id = 4
+    ('Mesa Office','moveis',650.00,10);          -- produto_id = 5
+
+INSERT INTO pedido (cliente_id, status, total) VALUES (1,'FECHADO',4500.00);
+INSERT INTO item_pedido (pedido_id, produto_id, quantidade, preco_unitario)
+    VALUES (1,1,1,4500.00);
+</code></pre>
+<p>Estado inicial relevante: <strong>produto 1 → estoque 30</strong>, <strong>produto 2 → estoque 40</strong>,
+<strong>3 produtos</strong> na categoria <code>eletronicos</code>.</p>
+<hr />
+<h2 id="3-codigo-das-4-transacoes">3. Código das 4 transações</h2>
+<h3 id="t1-relatorio-causa-phantom-read-sqltransactionst1_phantomsql">T1 — Relatório (causa Phantom Read) — <code>sql/transactions/t1_phantom.sql</code></h3>
+<pre><code class="language-sql">BEGIN;
+SET TRANSACTION ISOLATION LEVEL READ COMMITTED;   -- nivel explicito
+SELECT count(*) FROM produto WHERE categoria = 'eletronicos';  -- 1a leitura = 3
+SELECT pg_sleep(:sleep1);                          -- janela para T4 inserir+commit
+SELECT count(*) FROM produto WHERE categoria = 'eletronicos';  -- 2a leitura = 4 (PHANTOM)
+SELECT sum(estoque) FROM produto WHERE categoria = 'eletronicos';
+COMMIT;
+</code></pre>
+<h3 id="t2-transferencia-de-estoque-causa-deadlock-sqltransactionst2_deadlocksql">T2 — Transferência de estoque (causa Deadlock) — <code>sql/transactions/t2_deadlock.sql</code></h3>
+<pre><code class="language-sql">BEGIN;
+SELECT produto_id, estoque FROM produto WHERE produto_id = 1 FOR UPDATE; -- trava linha 1
+UPDATE produto SET estoque = estoque - 5 WHERE produto_id = 1;
+SELECT pg_sleep(:sleep1);                                                -- deixa T3 travar linha 2
+SELECT produto_id, estoque FROM produto WHERE produto_id = 2 FOR UPDATE; -- ESPERA -&gt; DEADLOCK
+UPDATE produto SET estoque = estoque + 5 WHERE produto_id = 2;
+COMMIT;   -- nao alcancado: PostgreSQL aborta (40P01) -&gt; ROLLBACK
+</code></pre>
+<h3 id="t3-venda-executa-sem-inconsistencias-sqltransactionst3_vendasql">T3 — Venda (executa sem inconsistências) — <code>sql/transactions/t3_venda.sql</code></h3>
+<pre><code class="language-sql">BEGIN;
+SELECT produto_id, estoque FROM produto WHERE produto_id = 2 FOR UPDATE; -- trava linha 2
+UPDATE produto SET estoque = estoque - 1 WHERE produto_id = 2;
+SELECT pg_sleep(:sleep1);                                                -- forma o ciclo com T2
+SELECT produto_id, estoque FROM produto WHERE produto_id = 1 FOR UPDATE; -- espera; apos T2 abortar, segue
+UPDATE produto SET estoque = estoque - 1 WHERE produto_id = 1;
+INSERT INTO pedido (cliente_id, status, total) VALUES (2,'FECHADO',7499.90);
+INSERT INTO item_pedido (pedido_id, produto_id, quantidade, preco_unitario)
+  VALUES (currval('pedido_pedido_id_seq'), 2, 1, 2999.90);
+COMMIT;   -- consistente
+</code></pre>
+<h3 id="t4-cadastroreposicao-executa-sem-inconsistencias-sqltransactionst4_cadastrosql">T4 — Cadastro/reposição (executa sem inconsistências) — <code>sql/transactions/t4_cadastro.sql</code></h3>
+<pre><code class="language-sql">BEGIN;
+SELECT pg_sleep(:sleep1);                              -- deixa T1 fazer a 1a leitura
+INSERT INTO produto (nome, categoria, preco, estoque)  -- novo item -&gt; phantom de T1
+  VALUES ('Fone Bluetooth ...', 'eletronicos', 199.90, 50);
+UPDATE produto SET estoque = estoque + 10 WHERE produto_id = 3;
+SELECT count(*) FROM produto WHERE categoria = 'eletronicos';
+COMMIT;   -- consistente; torna o INSERT visivel a T1
+</code></pre>
+<p>Cada transação tem <strong>≥ 4 instruções</strong> e todas tocam <strong>dados em comum</strong>
+(produtos 1/2 e a categoria <code>eletronicos</code>), usando <strong>bloqueios implícitos</strong>
+(UPDATE/INSERT, snapshot de leitura) e <strong>explícitos</strong> (<code>SELECT ... FOR UPDATE</code>;
+<code>LOCK TABLE</code> é usado na avaliação de desempenho, item 5).</p>
+<hr />
+<h2 id="4-tabela-do-cenario-de-escalonamento">4. Tabela do cenário de escalonamento</h2>
+<p>Saída real de <code>scripts/scenario_full.sh</code> (T1 em READ COMMITTED). Estado inicial:
+produto 1 = 30, produto 2 = 40, 3 produtos <code>eletronicos</code>.</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: right;">Ordem</th>
+<th>T1 (relatório)</th>
+<th>T2 (transferência)</th>
+<th>T3 (venda)</th>
+<th>T4 (cadastro)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: right;"><strong>1</strong></td>
+<td><code>BEGIN</code>; <code>COUNT eletronicos</code></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td style="text-align: right;"></td>
+<td><strong>Resultado:</strong> 3</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td style="text-align: right;"></td>
+<td><strong>Observação:</strong> snapshot da 1ª leitura em READ COMMITTED</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td style="text-align: right;"><strong>2</strong></td>
+<td></td>
+<td><code>BEGIN</code>; <code>SELECT prod 1 FOR UPDATE</code>; <code>UPDATE prod1 -5</code></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td style="text-align: right;"></td>
+<td></td>
+<td><strong>Resultado:</strong> trava linha do produto 1</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td style="text-align: right;"></td>
+<td></td>
+<td><strong>Observação:</strong> bloqueio <strong>exclusivo de linha</strong> adquirido (implícito p/ UPDATE, explícito via FOR UPDATE)</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td style="text-align: right;"><strong>3</strong></td>
+<td></td>
+<td></td>
+<td><code>BEGIN</code>; <code>SELECT prod 2 FOR UPDATE</code>; <code>UPDATE prod2 -1</code></td>
+<td></td>
+</tr>
+<tr>
+<td style="text-align: right;"></td>
+<td></td>
+<td></td>
+<td><strong>Resultado:</strong> trava linha do produto 2</td>
+<td></td>
+</tr>
+<tr>
+<td style="text-align: right;"></td>
+<td></td>
+<td></td>
+<td><strong>Observação:</strong> bloqueio exclusivo de linha adquirido</td>
+<td></td>
+</tr>
+<tr>
+<td style="text-align: right;"><strong>4</strong></td>
+<td></td>
+<td></td>
+<td></td>
+<td><code>BEGIN</code>; aguarda; <code>INSERT eletronicos</code>; <code>UPDATE prod3 +10</code>; <code>COMMIT</code></td>
+</tr>
+<tr>
+<td style="text-align: right;"></td>
+<td></td>
+<td></td>
+<td></td>
+<td><strong>Resultado:</strong> novo produto inserido e <strong>commitado</strong></td>
+</tr>
+<tr>
+<td style="text-align: right;"></td>
+<td></td>
+<td></td>
+<td></td>
+<td><strong>Observação:</strong> sem conflito de lock; libera a versão nova para leitores</td>
+</tr>
+<tr>
+<td style="text-align: right;"><strong>5</strong></td>
+<td></td>
+<td><code>SELECT prod 2 FOR UPDATE</code></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td style="text-align: right;"></td>
+<td></td>
+<td><strong>Resultado:</strong> <strong>ESPERA</strong> (bloqueado)</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td style="text-align: right;"></td>
+<td></td>
+<td><strong>Observação:</strong> linha 2 está travada por T3 → T2 entra em espera</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td style="text-align: right;"><strong>6</strong></td>
+<td></td>
+<td></td>
+<td><code>SELECT prod 1 FOR UPDATE</code></td>
+<td></td>
+</tr>
+<tr>
+<td style="text-align: right;"></td>
+<td></td>
+<td></td>
+<td><strong>Resultado:</strong> <strong>ESPERA</strong> (bloqueado)</td>
+<td></td>
+</tr>
+<tr>
+<td style="text-align: right;"></td>
+<td></td>
+<td></td>
+<td><strong>Observação:</strong> linha 1 travada por T2 → fecha o <strong>ciclo</strong> (T2→T3→T2)</td>
+<td></td>
+</tr>
+<tr>
+<td style="text-align: right;"><strong>7</strong></td>
+<td></td>
+<td><strong>DEADLOCK detectado (40P01)</strong> → <code>ROLLBACK</code></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td style="text-align: right;"></td>
+<td></td>
+<td><strong>Resultado:</strong> transação <strong>abortada (vítima)</strong></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td style="text-align: right;"></td>
+<td></td>
+<td><strong>Observação:</strong> PostgreSQL quebra o ciclo abortando T2; libera a linha 1</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td style="text-align: right;"><strong>8</strong></td>
+<td></td>
+<td></td>
+<td>adquire linha 1; <code>UPDATE prod1 -1</code>; <code>INSERT pedido/item</code>; <code>COMMIT</code></td>
+<td></td>
+</tr>
+<tr>
+<td style="text-align: right;"></td>
+<td></td>
+<td></td>
+<td><strong>Resultado:</strong> venda <strong>concluída e consistente</strong></td>
+<td></td>
+</tr>
+<tr>
+<td style="text-align: right;"></td>
+<td></td>
+<td></td>
+<td><strong>Observação:</strong> espera terminou ao T2 liberar o lock; sem inconsistência</td>
+<td></td>
+</tr>
+<tr>
+<td style="text-align: right;"><strong>9</strong></td>
+<td><code>COUNT eletronicos</code>; <code>SUM</code>; <code>COMMIT</code></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td style="text-align: right;"></td>
+<td><strong>Resultado:</strong> <strong>4 (PHANTOM)</strong></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td style="text-align: right;"></td>
+<td><strong>Observação:</strong> 2ª leitura vê a linha inserida e commitada por T4 (passo 4)</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Estado final (consistente):</strong> produto 1 = 29, produto 2 = 39 (apenas a venda de T3
+aplicada; a transferência de T2 foi revertida), produto 3 = 35 (reposição de T4),
++ novo produto <code>eletronicos</code> (estoque 50).</p>
+<h3 id="comentario-sobre-bloqueios-e-esperas">Comentário sobre bloqueios e esperas</h3>
+<ul>
+<li><strong>Bloqueios implícitos:</strong> todo <code>UPDATE</code>/<code>INSERT</code> adquire bloqueio exclusivo na linha
+  afetada até o fim da transação; leituras em READ COMMITTED usam <em>snapshot por comando</em>.</li>
+<li><strong>Bloqueios explícitos:</strong> <code>SELECT ... FOR UPDATE</code> trava antecipadamente as linhas dos
+  produtos 1 e 2, o que é exatamente o que cria a espera mútua (passos 5–6).</li>
+<li><strong>Espera/Deadlock:</strong> T2 espera a linha 2 (de T3) e T3 espera a linha 1 (de T2). O
+  detector de deadlock do PostgreSQL (<code>deadlock_timeout</code>, padrão 1s) identifica o ciclo
+  e aborta uma vítima (T2), garantindo progresso. T3 prossegue assim que o lock é liberado.</li>
+<li><strong>Phantom:</strong> T1, em READ COMMITTED, enxerga em sua 2ª leitura uma linha que <strong>não
+  existia</strong> na 1ª (inserida e commitada por T4). Em SERIALIZABLE isso não ocorre (ver §5).</li>
+</ul>
+<hr />
+<h2 id="5-avaliacao-de-desempenho">5. Avaliação de desempenho</h2>
+<p>Foram escolhidas <strong>duas abordagens</strong> (a spec pede ≥ 2):</p>
+<ol>
+<li><strong>Tempo de execução</strong> de um lote concorrente.</li>
+<li><strong>Número de tentativas de execução</strong> (retries por <em>serialization failure</em> <code>40001</code>
+   e por <em>deadlock</em> <code>40P01</code>).</li>
+</ol>
+<p>Carga (<code>scripts/perf_isolation.sh</code>): <strong>4 workers concorrentes × 10 transações</strong> = 40
+transações por estratégia. Cada transação lê por predicado (<code>COUNT</code> da categoria
+<code>eletronicos</code>) e em seguida escreve nos produtos 1 e 2 (rw-conflito clássico de SSI),
+com <code>pg_sleep(0.02)</code> para alargar a janela de conflito.</p>
+<h3 id="51-comparacao-de-niveis-de-isolamento-e-mecanismos-de-bloqueio">5.1 Comparação de níveis de isolamento e mecanismos de bloqueio</h3>
+<p>Resultado de uma execução típica (<code>logs/run_perf.log</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Estratégia</th>
+<th style="text-align: right;">Txs</th>
+<th style="text-align: right;">Tentativas</th>
+<th style="text-align: right;">Retries</th>
+<th style="text-align: right;">Tempo (ms)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>READ COMMITTED</strong> (bloqueio implícito de linha)</td>
+<td style="text-align: right;">40</td>
+<td style="text-align: right;">40</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">~1010</td>
+</tr>
+<tr>
+<td><strong>SERIALIZABLE</strong> (SSI)</td>
+<td style="text-align: right;">40</td>
+<td style="text-align: right;">~142–150</td>
+<td style="text-align: right;">~102–110</td>
+<td style="text-align: right;">~4200–4500</td>
+</tr>
+<tr>
+<td><strong>READ COMMITTED + <code>LOCK TABLE ... IN EXCLUSIVE MODE</code></strong></td>
+<td style="text-align: right;">40</td>
+<td style="text-align: right;">40</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">~1030</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>Os números variam um pouco a cada execução; rode <code>scripts/perf_isolation.sh</code>
+para reproduzir.</p>
+</blockquote>
+<h3 id="52-analise">5.2 Análise</h3>
+<ul>
+<li>
+<p><strong>Concorrência × consistência (READ COMMITTED):</strong> alta vazão e <strong>zero retries</strong>,
+  porque conflitos são resolvidos por bloqueio de linha (um espera o outro). Em
+  compensação, READ COMMITTED <strong>permite phantom read</strong> (demonstrado por T1) e
+  anomalias de escrita não evitadas por locks explícitos.</p>
+</li>
+<li>
+<p><strong>SERIALIZABLE:</strong> oferece a <strong>maior garantia de consistência</strong> (serializável de
+  verdade, via <em>Serializable Snapshot Isolation</em>) e <strong>elimina o phantom</strong> — em §4 a
+  variante SERIALIZABLE de T1 lê 3 nas duas vezes. O custo é alto: ~<strong>102–110 retries</strong>
+  e tempo <strong>~4× maior</strong>, pois transações conflitantes abortam com <code>40001</code> e precisam
+  ser reexecutadas pela aplicação.</p>
+</li>
+<li>
+<p><strong><code>LOCK TABLE IN EXCLUSIVE MODE</code>:</strong> serializa o acesso por <strong>bloqueio de tabela</strong>.
+  Não há retries (como em READ COMMITTED) e a consistência é forte para a operação,
+  mas ao custo de <strong>serialização total</strong> da tabela (menor concorrência sob carga maior).
+  É o oposto do otimismo do SERIALIZABLE: pessimista e determinístico.</p>
+</li>
+<li>
+<p><strong><code>SELECT ... FOR UPDATE</code></strong> (usado em T2/T3): bloqueio pessimista <strong>por linha</strong>,
+  granularidade melhor que <code>LOCK TABLE</code>. Garante leitura-para-atualização sem perder
+  atualizações; pode, porém, gerar <strong>deadlock</strong> quando linhas são travadas em ordens
+  opostas (exatamente o caso de T2×T3).</p>
+</li>
+</ul>
+<p><strong>Conclusão:</strong> não há estratégia universalmente melhor. READ COMMITTED + locks
+explícitos de linha (<code>FOR UPDATE</code>) dá o melhor equilíbrio para operações pontuais
+(venda, transferência). SERIALIZABLE é indicado quando a aplicação exige ausência de
+anomalias (relatórios/consistência forte) e está preparada para <strong>reexecutar</strong>
+transações abortadas. <code>LOCK TABLE</code> é o recurso mais grosseiro, útil em lotes
+administrativos onde a serialização total é aceitável.</p>
+<hr />
+<h2 id="anexos-reproducao">Anexos / reprodução</h2>
+<ul>
+<li><code>docker-compose.yml</code> — serviço PostgreSQL 18.</li>
+<li><code>scripts/run_all.sh</code> — pipeline completo (init + 3 cenários + desempenho).</li>
+<li><code>scripts/scenario_phantom.sh</code>, <code>scenario_deadlock.sh</code>, <code>scenario_full.sh</code>.</li>
+<li><code>scripts/perf_isolation.sh</code> — avaliação de desempenho.</li>
+<li>Logs de cada execução em <code>logs/</code>.</li>
+</ul></body></html>
